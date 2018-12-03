@@ -118,7 +118,8 @@ void receiveEvent(int numberOfBytesReceived)
   //Begin recording the following incoming bytes to the temp memory map
   //starting at the registerNumber (the first byte received)
   byte x = 0;
-  while (Wire.available())
+  //while (Wire.available())
+  while(x < numberOfBytesReceived - 1)
   {
     byte temp = Wire.read(); //We might record it, we might throw it away
 
@@ -126,12 +127,9 @@ void receiveEvent(int numberOfBytesReceived)
     {
       //Clense the incoming byte against the read only protected bits
       //Store the result into the register map
-
-      //*(registerPointer + registerNumber + x) &= ~*(protectionPointer + registerNumber + x); //Clear this register if needed
-      //*(registerPointer + registerNumber + x) |= temp & *(protectionPointer + registerNumber + x); //Or in the user's request (clensed against protection bits)
+      *(registerPointer + registerNumber + x) &= ~*(protectionPointer + registerNumber + x); //Clear this register if needed
+      *(registerPointer + registerNumber + x) |= temp & *(protectionPointer + registerNumber + x); //Or in the user's request (clensed against protection bits)
       
-      *(registerPointer + registerNumber + x) = temp; //No protection
-
       x++;
     }
   }
@@ -149,14 +147,15 @@ void requestEvent()
   if(lastEncoderTwistTime > 0) registerMap.timeSinceLastMovement = millis() - lastEncoderTwistTime;
   if(lastButtonTime > 0) registerMap.timeSinceLastButton = millis() - lastButtonTime;
 
+  //Clear the interrupt pin once user has requested something
+  interruptIndicated = false;
+  digitalWrite(interruptPin, HIGH);
+  pinMode(interruptPin, INPUT); //Go to high impedance
+
   //This will write the entire contents of the register map struct starting from
   //the register the user requested, and when it reaches the end the master
   //will read 0xFFs.
   Wire.write((registerPointer + registerNumber), sizeof(memoryMap) - registerNumber);
-
-  //Clear the interrupt pin once user has requested something
-  interruptIndicated = false;
-  pinMode(interruptPin, INPUT); //Go to high impedance
 }
 
 //Called any time the pin changes state
@@ -164,7 +163,7 @@ void buttonInterrupt()
 {
   registerMap.status ^= (1 << statusButtonPressedBit); //Toggle the status bit to indicate button interaction
 
-  if ( (registerMap.status & (1 << statusButtonPressedBit)) == 0) //User has released the button, we have completed a click cycle
+  if (digitalRead(switchPin) == LOW) //User has released the button, we have completed a click cycle
   {
     registerMap.status |= (1 << statusButtonClickedBit); //Set the clicked bit
     lastButtonTime = millis();

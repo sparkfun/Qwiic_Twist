@@ -122,10 +122,10 @@ volatile memoryMap registerMap = {
 //This defines which of the registers are read-only (0) vs read-write (1)
 memoryMap protectionMap = {
   .id = 0x00,
-  .status = 0xFF,
+  .status = (1<<statusButtonClickedBit) | (1<<statusEncoderMovedBit),//2 - button clicked, 1 - button pressed, 0 - encoder moved
   .firmwareMajor = 0x00,
   .firmwareMinor = 0x00,
-  .interruptEnable = 0xFF,
+  .interruptEnable = (1<<enableInterruptButtonBit) | (1<<enableInterruptEncoderBit), //1 - button int enable, 0 - encoder int enable
   .encoderCount = 0xFFFF,
   .encoderDifference = 0xFFFF,
   .timeSinceLastMovement = 0xFFFF,
@@ -154,7 +154,7 @@ volatile byte interruptIndicated = false; //Tracks the state of the int output p
 
 volatile unsigned long lastButtonTime; //Time stamp of last button event
 
-volatile unsigned long lastEncoderTwistTime; //Time stamp of last twist.
+volatile unsigned long lastEncoderTwistTime; //Time stamp of last knob movement
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
@@ -167,7 +167,7 @@ void setup(void)
   pinMode(switchPin, INPUT); //No pull-up. It's pulled low with 10k
   pinMode(encoderBPin, INPUT); //No pull-up. External 10k
   pinMode(encoderAPin, INPUT); //No pull-up. External 10k
-  pinMode(interruptPin, INPUT); //Interrupt is high-impedance until we have int (and then go low). Optional external pull up.
+  pinMode(interruptPin, INPUT); //Interrupt is high-impedance until we have int (and then go low). Pulled high with 10k with cuttable jumper.
 
 #if defined(__AVR_ATmega328P__)
   pinMode(addressPin, INPUT_PULLUP);
@@ -277,6 +277,11 @@ void recordSystemSettings(void)
     startI2C(); //Determine the I2C address we should be using and begin listening on I2C bus
   }
 
+  byte intBits;
+  EEPROM.get(LOCATION_INTERRUPTS, intBits);
+  if (intBits != registerMap.interruptEnable)
+    EEPROM.put(LOCATION_INTERRUPTS, registerMap.interruptEnable);
+
   //LED values are bytes
   byte ledBrightness;
 
@@ -316,6 +321,11 @@ void recordSystemSettings(void)
   EEPROM.get(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, timeout);
   if (timeout != registerMap.turnInterruptTimeout)
     EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
+
+  //If the user has zero'd out the timestamps then reflect that in the globals
+  if(registerMap.timeSinceLastMovement == 0) lastEncoderTwistTime = 0;
+  if(registerMap.timeSinceLastButton == 0) lastButtonTime = 0;
+
 }
 
 //Reads the current system settings from EEPROM
@@ -328,6 +338,14 @@ void readSystemSettings(void)
   {
     registerMap.i2cAddress = I2C_ADDRESS_DEFAULT; //By default, we listen for I2C_ADDRESS_DEFAULT
     EEPROM.write(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
+  }
+
+  //Read the interrupt bits
+  registerMap.interruptEnable = EEPROM.read(LOCATION_INTERRUPTS);
+  if (registerMap.interruptEnable == 0xFF) //Blank
+  {
+    registerMap.interruptEnable = 0x03; //By default, enable the click and encoder interrupts
+    EEPROM.write(LOCATION_INTERRUPTS, registerMap.interruptEnable);
   }
 
   //Read the starting value for the red LED

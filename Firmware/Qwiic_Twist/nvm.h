@@ -1,6 +1,7 @@
 //Location in EEPROM for each thing we want to store between power cycles
 enum eepromLocations {
   LOCATION_I2C_ADDRESS, //Device's address
+  LOCATION_INTERRUPTS,
   LOCATION_RED_BRIGHTNESS,
   LOCATION_GREEN_BRIGHTNESS,
   LOCATION_BLUE_BRIGHTNESS,
