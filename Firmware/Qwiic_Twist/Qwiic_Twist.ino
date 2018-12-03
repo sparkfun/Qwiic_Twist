@@ -25,10 +25,8 @@
   To support 400kHz I2C communication reliably ATtiny84 needs to run at 8MHz. This requires user to
   click on 'Burn Bootloader' before code is loaded.
 
+  TODO -
   We don't track which reason the interrupt pin was set and which feature the user has read
-
-  This RGB encoder has a 24 indent for one rotation.
-  Each indent causes four change interrupts to fire so we divide count by four.
 */
 
 #include <Wire.h>
@@ -41,10 +39,6 @@
 
 #include <avr/sleep.h> //Needed for sleep_mode
 #include <avr/power.h> //Needed for powering down perihperals such as the ADC/TWI and Timers
-
-//Firmware version. This is sent when requested. Helpful for tech support.
-const byte firmwareVersionMajor = 1;
-const byte firmwareVersionMinor = 0;
 
 #if defined(__AVR_ATmega328P__)
 //Hardware connections while developing with an Uno
@@ -72,33 +66,97 @@ const byte interruptPin = 0;
 //Global variables
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 //Variables used in the I2C interrupt so we use volatile
-volatile byte responseType = RESPONSE_GET_ENCODER_COUNT; //Tracks how to respond based on incoming requests
-volatile byte interruptOn = false; //Interrupt turns on when encoder changes position, turns off when status is read
 
-volatile int encoderValue = 0; //-32768 to 32767 - Global encoder value. Can be reset via command.
-volatile int encoderDifference = 0; //-32768 to 32767 - Difference from last read. Reset after each query.
+//This is the pseudo register map of the product. If user asks for 0x02 then get the 3rd
+//byte inside the register map.
+//5602/118 on ATtiny84 prior to conversion
+//Approximately 4276/156 on ATtiny84 after conversion
+struct memoryMap {
+  byte id;
+  byte status;
+  byte firmwareMajor;
+  byte firmwareMinor;
+  byte interruptEnable;
+  int16_t encoderCount;
+  int16_t encoderDifference;
+  uint16_t timeSinceLastMovement;
+  uint16_t timeSinceLastButton;
+  byte ledBrightnessRed;
+  byte ledBrightnessGreen;
+  byte ledBrightnessBlue;
+  int16_t ledConnectRed;
+  int16_t ledConnectGreen;
+  int16_t ledConnectBlue;
+  uint16_t turnInterruptTimeout;
+  byte i2cAddress;
+};
+
+const byte statusButtonClickedBit = 2;
+const byte statusButtonPressedBit = 1;
+const byte statusEncoderMovedBit = 0;
+
+const byte enableInterruptButtonBit = 1;
+const byte enableInterruptEncoderBit = 0;
+
+//These are the defaults for all settings
+volatile memoryMap registerMap = {
+  .id = 0x5C,
+  .status = 0x00, //2 - button clicked, 1 - button pressed, 0 - encoder moved
+  .firmwareMajor = 0x01, //Firmware version. Helpful for tech support.
+  .firmwareMinor = 0x00,
+  .interruptEnable = 0x03, //1 - button interrupt, 0 - encoder interrupt
+  .encoderCount = 0x0000,
+  .encoderDifference = 0x0000,
+  .timeSinceLastMovement = 0x0000,
+  .timeSinceLastButton = 0x0000,
+  .ledBrightnessRed = 0xFF,
+  .ledBrightnessGreen = 0xFF,
+  .ledBrightnessBlue = 0xFF,
+  .ledConnectRed = 0x0000,
+  .ledConnectGreen = 0x0000,
+  .ledConnectBlue = 0x0000,
+  .turnInterruptTimeout = 250,
+  .i2cAddress = I2C_ADDRESS_DEFAULT,
+};
+
+//This defines which of the registers are read-only (0) vs read-write (1)
+memoryMap protectionMap = {
+  .id = 0x00,
+  .status = 0xFF,
+  .firmwareMajor = 0x00,
+  .firmwareMinor = 0x00,
+  .interruptEnable = 0xFF,
+  .encoderCount = 0xFFFF,
+  .encoderDifference = 0xFFFF,
+  .timeSinceLastMovement = 0xFFFF,
+  .timeSinceLastButton = 0xFFFF,
+  .ledBrightnessRed = 0xFF,
+  .ledBrightnessGreen = 0xFF,
+  .ledBrightnessBlue = 0xFF,
+  .ledConnectRed = 0xFFFF,
+  .ledConnectGreen = 0xFFFF,
+  .ledConnectBlue = 0xFFFF,
+  .turnInterruptTimeout = 0xFFFF,
+  .i2cAddress = 0xFF,
+};
+
+//Cast 32bit address of the object registerMap with uint8_t so we can increment the pointer
+uint8_t *registerPointer = (uint8_t *)&registerMap;
+uint8_t *protectionPointer = (uint8_t *)&protectionMap;
+
+volatile byte registerNumber; //Gets set when user writes an address. We then serve the spot the user requested.
+
+volatile boolean updateOutputs = false; //Goes true when we receive new bytes from user. Causes LEDs and things to update in main loop.
+
 volatile byte lastEncoded = 0; //Used to compare encoder readings between interrupts. Helps detect turn direction.
 
-volatile boolean buttonPressed = false; //Assume user is not pressing button at startup
-volatile boolean isClicked = false; //The button has not been through a press-release cycle
+volatile byte interruptIndicated = false; //Tracks the state of the int output pin - helps prevent the need of constantly writing to the pin
+
 volatile unsigned long lastButtonTime; //Time stamp of last button event
 
 volatile unsigned long lastEncoderTwistTime; //Time stamp of last twist.
-volatile boolean twistInterrupt = false;
-
-//User editable settings
-volatile byte settingI2CAddress; //The 7-bit I2C address of this KeyPad
-volatile unsigned int settingTurnInterruptTimeout; //Number of miliseconds to wait between knob stopping and int pin going low
-
-volatile byte settingRedLED; //Brightness of the red LED
-volatile int settingRedConnectAmount; //Change the red LED brightness this amount with each enocder tick
-volatile byte settingGreenLED; //Brightness of the green LED
-volatile int settingGreenConnectAmount; //Change the green LED brightness this amount with each enocder tick
-volatile byte settingBlueLED; //Brightness of the blue LED
-volatile int settingBlueConnectAmount; //Change the blue LED brightness this amount with each enocder tick
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
 
 void setup(void)
 {
@@ -118,7 +176,7 @@ void setup(void)
   pinMode(ledBluePin, OUTPUT);
   pinMode(switchPin, INPUT); //No pull-up. It's pulled low with 10k
   pinMode(encoderBPin, INPUT_PULLUP);
-  pinMode(encoderAPin, INPUT_PULLUP); 
+  pinMode(encoderAPin, INPUT_PULLUP);
   pinMode(interruptPin, INPUT); //Interrupt is high-impedance until we have int (and then go low). Optional external pull up.
 #endif
 
@@ -134,7 +192,7 @@ void setup(void)
   //Get the initial state of encoder pins
   //byte MSB = digitalRead(encoderAPin);
   //byte LSB = digitalRead(encoderBPin);
-  //l/astEncoded = (MSB << 1) | LSB; //Convert the 2 pin value to single number
+  //lastEncoded = (MSB << 1) | LSB; //Convert the 2 pin value to single number
 
   startI2C(); //Determine the I2C address we should be using and begin listening on I2C bus
 
@@ -144,7 +202,7 @@ void setup(void)
   Serial.print("Address: 0x");
 
   if (digitalRead(addressPin) == HIGH) //Default is HIGH, the address jumper is open
-    Serial.print(settingI2CAddress, HEX);
+    Serial.print(registerMap.i2cAddress, HEX);
   else
     Serial.print(I2C_FORCED_ADDRESS, HEX);
   Serial.println();
@@ -154,36 +212,50 @@ void setup(void)
 
 void loop(void)
 {
-  //See if the user has stopped turning the encoder
-  //If they have, see if this is a newTwist or if we've already asserted int
-  if ( (millis() - lastEncoderTwistTime) > settingTurnInterruptTimeout
-       && lastEncoderTwistTime > 0 //Ignore startup lastEncoderTwistTime
-       && twistInterrupt == true
-     )
+  //Check if interrupts are enabled
+  if ( (registerMap.interruptEnable & (1 << enableInterruptEncoderBit) ) )
   {
-    if (interruptOn == false)
+    //See if user has turned the encoder at all
+    if ( registerMap.status & (1 << statusEncoderMovedBit) )
     {
-      twistInterrupt = false;
-      interruptOn = true;
-      pinMode(interruptPin, OUTPUT); //Go to output to indicate interrupt
-      digitalWrite(interruptPin, LOW); //Pull pin low
+      //See if the user has stopped turning the encoder
+      //If they have, see if this is a newTwist or if we've already asserted int
+      if ( (millis() - lastEncoderTwistTime) > registerMap.turnInterruptTimeout)
+      {
+        indicateInterrupt(); //Drive INT pin low
+      }
     }
+  }
+
+  if (updateOutputs == true)
+  {
+    updateOutputs = false;
+
+    //Record anything new to EEPROM like connection values and LED values
+    //It can take ~3.4ms to write EEPROM byte so we do that here instead of in interrupt
+    recordSystemSettings();
   }
 
 #if defined(__AVR_ATmega328P__)
   Serial.print("Encoder: ");
-  Serial.print(encoderValue);
+  Serial.print(registerMap.encoderCount);
 
-  Serial.print(" Green: ");
-  Serial.print(settingGreenLED);
+  Serial.print(" Red: ");
+  Serial.print(registerMap.ledBrightnessRed);
 
   Serial.print(" Blue: ");
-  Serial.print(settingBlueLED);
+  Serial.print(registerMap.ledBrightnessBlue);
 
   Serial.print(" Diff: ");
-  Serial.print(encoderDifference);
+  Serial.print(registerMap.encoderDifference);
 
-  if (isClicked)
+  Serial.print(" Reg: ");
+  Serial.print(registerNumber);
+
+  Serial.print(" RegValue: 0x");
+  Serial.print(*(registerPointer + registerNumber), HEX);
+
+  if (registerMap.status & (1 << statusButtonClickedBit) )
     Serial.print(" Click");
 
   Serial.println();
@@ -192,60 +264,113 @@ void loop(void)
   //sleep_mode(); //Stop everything and go to sleep. Wake up from Encoder, Button, or I2C interrupts.
 }
 
+//If the current setting is different from that in EEPROM, update EEPROM
+void recordSystemSettings(void)
+{
+  //I2C address is byte
+  byte i2cAddr;
+
+  EEPROM.get(LOCATION_I2C_ADDRESS, i2cAddr);
+  if (i2cAddr != registerMap.i2cAddress)
+  {
+    EEPROM.put(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
+    startI2C(); //Determine the I2C address we should be using and begin listening on I2C bus
+  }
+
+  //LED values are bytes
+  byte ledBrightness;
+
+  EEPROM.get(LOCATION_RED_BRIGHTNESS, ledBrightness);
+  if (ledBrightness != registerMap.ledBrightnessRed)
+    EEPROM.put(LOCATION_RED_BRIGHTNESS, registerMap.ledBrightnessRed);
+  analogWrite(ledRedPin, 255 - registerMap.ledBrightnessRed); //Change LED brightness
+
+  EEPROM.get(LOCATION_GREEN_BRIGHTNESS, ledBrightness);
+  if (ledBrightness != registerMap.ledBrightnessGreen)
+    EEPROM.put(LOCATION_GREEN_BRIGHTNESS, registerMap.ledBrightnessGreen);
+  analogWrite(ledGreenPin, 255 - registerMap.ledBrightnessGreen); //Change LED brightness
+
+  EEPROM.get(LOCATION_BLUE_BRIGHTNESS, ledBrightness);
+  if (ledBrightness != registerMap.ledBrightnessBlue)
+    EEPROM.put(LOCATION_BLUE_BRIGHTNESS, registerMap.ledBrightnessBlue);
+  analogWrite(ledBluePin, 255 - registerMap.ledBrightnessBlue); //Change LED brightness
+
+  //Connect amounts are ints
+  int16_t setting;
+
+  EEPROM.get(LOCATION_RED_CONNECT_AMOUNT, setting);
+  if (setting != registerMap.ledConnectRed)
+    EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed);
+
+  EEPROM.get(LOCATION_GREEN_CONNECT_AMOUNT, setting);
+  if (setting != registerMap.ledConnectGreen)
+    EEPROM.put(LOCATION_GREEN_CONNECT_AMOUNT, registerMap.ledConnectGreen);
+
+  EEPROM.get(LOCATION_BLUE_CONNECT_AMOUNT, setting);
+  if (setting != registerMap.ledConnectBlue)
+    EEPROM.put(LOCATION_BLUE_CONNECT_AMOUNT, registerMap.ledConnectBlue);
+
+  //Turn Timeout is uint16_t
+  uint16_t timeout;
+
+  EEPROM.get(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, timeout);
+  if (timeout != registerMap.turnInterruptTimeout)
+    EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
+}
 
 //Reads the current system settings from EEPROM
 //If anything looks weird, reset setting to default value
 void readSystemSettings(void)
 {
   //Read what I2C address we should use
-  settingI2CAddress = EEPROM.read(LOCATION_I2C_ADDRESS);
-  if (settingI2CAddress == 255)
+  registerMap.i2cAddress = EEPROM.read(LOCATION_I2C_ADDRESS);
+  if (registerMap.i2cAddress == 255)
   {
-    settingI2CAddress = I2C_ADDRESS_DEFAULT; //By default, we listen for I2C_ADDRESS_DEFAULT
-    EEPROM.write(LOCATION_I2C_ADDRESS, settingI2CAddress);
+    registerMap.i2cAddress = I2C_ADDRESS_DEFAULT; //By default, we listen for I2C_ADDRESS_DEFAULT
+    EEPROM.write(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
   }
 
   //Read the starting value for the red LED
-  settingRedLED = EEPROM.read(LOCATION_RED_BRIGHTNESS);
-  analogWrite(ledRedPin, 255 - settingRedLED);
+  registerMap.ledBrightnessRed = EEPROM.read(LOCATION_RED_BRIGHTNESS);
+  analogWrite(ledRedPin, 255 - registerMap.ledBrightnessRed);
 
   //Read the starting value for the green LED
-  settingGreenLED = EEPROM.read(LOCATION_GREEN_BRIGHTNESS);
-  analogWrite(ledGreenPin, 255 - settingGreenLED);
+  registerMap.ledBrightnessGreen = EEPROM.read(LOCATION_GREEN_BRIGHTNESS);
+  analogWrite(ledGreenPin, 255 - registerMap.ledBrightnessGreen);
 
   //Read the starting value for the blue LED
-  settingBlueLED = EEPROM.read(LOCATION_BLUE_BRIGHTNESS);
-  analogWrite(ledBluePin, 255 - settingBlueLED);
+  registerMap.ledBrightnessBlue = EEPROM.read(LOCATION_BLUE_BRIGHTNESS);
+  analogWrite(ledBluePin, 255 - registerMap.ledBrightnessBlue);
 
   //Read the connection value for red color
   //There are 24 pulses per rotation on the encoder
   //For each pulse, how much does the user want red to go up (or down)
-  EEPROM.get(LOCATION_RED_CONNECT_AMOUNT, settingRedConnectAmount); //16-bit
-  if (settingRedConnectAmount == 0xFFFF)
+  EEPROM.get(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed); //16-bit
+  if (registerMap.ledConnectRed == 0xFFFF)
   {
-    settingRedConnectAmount = 0; //Default to no connection
-    EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, settingRedConnectAmount);
+    registerMap.ledConnectRed = 0; //Default to no connection
+    EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed);
   }
 
-  EEPROM.get(LOCATION_GREEN_CONNECT_AMOUNT, settingGreenConnectAmount);
-  if (settingGreenConnectAmount == 0xFFFF)
+  EEPROM.get(LOCATION_GREEN_CONNECT_AMOUNT, registerMap.ledConnectGreen);
+  if (registerMap.ledConnectGreen == 0xFFFF)
   {
-    settingGreenConnectAmount = 0; //Default to no connection
-    EEPROM.put(LOCATION_GREEN_CONNECT_AMOUNT, settingGreenConnectAmount);
+    registerMap.ledConnectGreen = 0; //Default to no connection
+    EEPROM.put(LOCATION_GREEN_CONNECT_AMOUNT, registerMap.ledConnectGreen);
   }
 
-  EEPROM.get(LOCATION_BLUE_CONNECT_AMOUNT, settingBlueConnectAmount);
-  if (settingBlueConnectAmount == 0xFFFF)
+  EEPROM.get(LOCATION_BLUE_CONNECT_AMOUNT, registerMap.ledConnectBlue);
+  if (registerMap.ledConnectBlue == 0xFFFF)
   {
-    settingBlueConnectAmount = 0; //Default to no connection
-    EEPROM.put(LOCATION_BLUE_CONNECT_AMOUNT, settingBlueConnectAmount);
+    registerMap.ledConnectBlue = 0; //Default to no connection
+    EEPROM.put(LOCATION_BLUE_CONNECT_AMOUNT, registerMap.ledConnectBlue);
   }
 
-  EEPROM.get(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, settingTurnInterruptTimeout);
-  if (settingTurnInterruptTimeout == 0xFFFF)
+  EEPROM.get(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
+  if (registerMap.turnInterruptTimeout == 0xFFFF)
   {
-    settingTurnInterruptTimeout = 250; //Default to 250ms
-    EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, settingTurnInterruptTimeout);
+    registerMap.turnInterruptTimeout = 250; //Default to 250ms
+    EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
   }
 }
 
@@ -271,11 +396,21 @@ void startI2C()
   Wire.end(); //Before we can change addresses we need to stop
 
   if (digitalRead(addressPin) == HIGH) //Default is HIGH, the address jumper is open
-    Wire.begin(settingI2CAddress); //Start I2C and answer calls using address from EEPROM
+    Wire.begin(registerMap.i2cAddress); //Start I2C and answer calls using address from EEPROM
   else
     Wire.begin(I2C_FORCED_ADDRESS); //Force address to I2C_FORCED_ADDRESS if user has closed the solder jumper
 
   //The connections to the interrupts are severed when a Wire.begin occurs. So re-declare them.
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
+}
+
+void indicateInterrupt()
+{
+  if (interruptIndicated == false) //Is the interrupt pin currently being driven low?
+  {
+    interruptIndicated = true;
+    pinMode(interruptPin, OUTPUT); //Go to output to indicate interrupt
+    digitalWrite(interruptPin, LOW); //Pull pin low
+  }
 }

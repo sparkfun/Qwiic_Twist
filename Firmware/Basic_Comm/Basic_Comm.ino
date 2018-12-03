@@ -26,56 +26,56 @@ byte deviceAddress = 0x3F;
 
 const byte interruptPin = 7;
 
-enum encoderCommands {
-  COMMAND_GET_VERSION = 0x00,
-  COMMAND_GET_ENCODER_COUNT,
-  COMMAND_SET_ENCODER_COUNT,
-  COMMAND_GET_DIFFERENCE,
-  COMMAND_GET_BUTTON_STATE, //Current state of button
-  COMMAND_GET_LAST_ENCODER_EVENT, //Millis since last movement of knob
-  COMMAND_GET_LAST_BUTTON_EVENT, //Millis since last press/release
-  COMMAND_IS_CLICKED, //True if user has pressed and released button since last isClicked() command
+const byte statusButtonClickedBit = 2;
+const byte statusButtonPressedBit = 1;
+const byte statusEncoderMovedBit = 0;
 
-  COMMAND_GET_RED,
-  COMMAND_GET_GREEN,
-  COMMAND_GET_BLUE,
-  COMMAND_GET_COLOR, //Get all three colors
-  COMMAND_SET_RED,
-  COMMAND_SET_GREEN,
-  COMMAND_SET_BLUE,
-  COMMAND_SET_COLOR,
+const byte enableInterruptButtonBit = 1;
+const byte enableInterruptEncoderBit = 0;
 
-  COMMAND_GET_CONNECT_RED,
-  COMMAND_GET_CONNECT_GREEN,
-  COMMAND_GET_CONNECT_BLUE,
-  COMMAND_GET_CONNECT_COLOR,
-  COMMAND_SET_CONNECT_RED, //Amount to change red LED for each encoder tick
-  COMMAND_SET_CONNECT_GREEN,
-  COMMAND_SET_CONNECT_BLUE,
-  COMMAND_SET_CONNECT_COLOR,
+enum encoderRegisters {
+  TWIST_ID = 0x00,
+  TWIST_STATUS = 0x01, //2 - button clicked, 1 - button pressed, 0 - encoder moved
+  TWIST_VERSION = 0x02,
+  TWIST_ENABLE_INTS = 0x04, //1 - button interrupt, 0 - encoder interrupt
+  TWIST_COUNT = 0x05,
+  TWIST_DIFFERENCE = 0x07,
+  TWIST_LAST_ENCODER_EVENT = 0x09, //Millis since last movement of knob
+  TWIST_LAST_BUTTON_EVENT = 0x0A, //Millis since last press/release
 
-  COMMAND_GET_TURN_INT_TIMEOUT,
-  COMMAND_SET_TURN_INT_TIMEOUT,
-  COMMAND_CHANGE_ADDRESS = 0xC7,
+  TWIST_RED = 0x0D,
+  TWIST_GREEN = 0x0E,
+  TWIST_BLUE = 0x0F,
+
+  TWIST_CONNECT_RED = 0x10, //Amount to change red LED for each encoder tick
+  TWIST_CONNECT_GREEN = 0x12,
+  TWIST_CONNECT_BLUE = 0x14,
+
+  TWIST_TURN_INT_TIMEOUT = 0x16,
+  TWIST_CHANGE_ADDRESS = 0x18,
 };
 
 void setup()
 {
   pinMode(interruptPin, INPUT_PULLUP);
-  
+
   Serial.begin(9600);
   Serial.println("Qwiic Twist Example");
 
   Wire.begin();
 
-  setEncoderColor(255, 255, 255); //R, G, B - max of 255
-  connectGreen(1);
-  connectRed(-1);
+  //int result = (readRegister(0));
+  //Serial.print("result: 0x");
+  //Serial.println(result, HEX);
+  //while(1);
+  //setEncoderColor(255, 255, 255); //R, G, B - max of 255
+  //connectBlue(1);
+  //connectRed(-1);
 }
 
 void loop()
 {
-  if(digitalRead(interruptPin) == LOW)
+  if (digitalRead(interruptPin) == LOW)
   {
     Serial.print("Int! ");
   }
@@ -84,10 +84,10 @@ void loop()
   Serial.print("Encoder: ");
   Serial.print(counts);
 
-  //int diff = getDiff(); //Get number of ticks different from last reading
-  //Serial.print("Diff: ");
-  //Serial.println(diff);
-
+  int diff = getDiff(); //Get number of ticks different from last reading
+  Serial.print(" Diff: ");
+  Serial.print(diff);
+  
   if (buttonPressed())
   {
     Serial.print(" Pressed!");
@@ -95,15 +95,13 @@ void loop()
 
   Serial.println();
 
-
-  delay(100);
+  delay(1000);
 }
 
 //Returns true if a click event has occured
 boolean buttonPressed()
 {
-  if (readRegister(COMMAND_IS_CLICKED)) return(true);
-  return(false);
+  return (readRegister(TWIST_STATUS) & (1 << statusButtonPressedBit));
 }
 
 //Connect the LED so it changes [amount] with each encoder tick
@@ -111,9 +109,9 @@ boolean buttonPressed()
 boolean connectGreen(int amount)
 {
   Wire.beginTransmission(deviceAddress);
-  Wire.write(COMMAND_SET_CONNECT_GREEN);
-  Wire.write(amount >> 8); //MSB
+  Wire.write(TWIST_CONNECT_GREEN);
   Wire.write(amount & 0xFF); //LSB
+  Wire.write(amount >> 8); //MSB
   if (Wire.endTransmission() != 0)
     return (false); //Sensor did not ACK
 
@@ -125,9 +123,9 @@ boolean connectGreen(int amount)
 boolean connectBlue(int amount)
 {
   Wire.beginTransmission(deviceAddress);
-  Wire.write(COMMAND_SET_CONNECT_BLUE);
-  Wire.write(amount >> 8); //MSB
+  Wire.write(TWIST_CONNECT_BLUE);
   Wire.write(amount & 0xFF); //LSB
+  Wire.write(amount >> 8); //MSB
   if (Wire.endTransmission() != 0)
     return (false); //Sensor did not ACK
 
@@ -139,9 +137,9 @@ boolean connectBlue(int amount)
 boolean connectRed(int amount)
 {
   Wire.beginTransmission(deviceAddress);
-  Wire.write(COMMAND_SET_CONNECT_RED);
-  Wire.write(amount >> 8); //MSB
+  Wire.write(TWIST_CONNECT_RED);
   Wire.write(amount & 0xFF); //LSB
+  Wire.write(amount >> 8); //MSB
   if (Wire.endTransmission() != 0)
     return (false); //Sensor did not ACK
 
@@ -152,7 +150,7 @@ boolean connectRed(int amount)
 boolean setEncoderColor(uint8_t red, uint8_t green, uint8_t blue)
 {
   Wire.beginTransmission(deviceAddress);
-  Wire.write(COMMAND_SET_COLOR); //Command
+  Wire.write(TWIST_RED); //Start at red memory location
   Wire.write(red);
   Wire.write(green);
   Wire.write(blue);
@@ -165,26 +163,11 @@ boolean setEncoderColor(uint8_t red, uint8_t green, uint8_t blue)
 //Returns the number of accrued encoder counts
 int getCounts()
 {
-  return (readRegister16(COMMAND_GET_ENCODER_COUNT));
+  return (readRegister16(TWIST_COUNT));
 }
 
 //Returns the number of ticks since last check
 int getDiff()
 {
-  return (readRegister16(COMMAND_GET_DIFFERENCE));
-
-  Wire.beginTransmission(deviceAddress);
-  Wire.write(COMMAND_GET_DIFFERENCE);
-  if (Wire.endTransmission() != 0)
-  {
-    Serial.println("No ack!");
-    return (0); //Sensor did not ACK
-  }
-
-  Wire.requestFrom((uint8_t)deviceAddress, (uint8_t)2);
-  if (Wire.available())
-  {
-    return ((int16_t)Wire.read() << 8 | Wire.read());
-  }
-  return (0); //Sensor did not respond
+  return (readRegister16(TWIST_DIFFERENCE));
 }
