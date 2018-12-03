@@ -27,7 +27,10 @@ uint16_t readRegister16(uint8_t addr)
   Wire.beginTransmission(deviceAddress);
   Wire.write(addr); //MSB
   if (Wire.endTransmission() != 0)
+  {
+    Serial.println("No ack!");
     return (0); //Sensor did not ACK
+  }
 
   Wire.requestFrom((uint8_t)deviceAddress, (uint8_t)2);
   if (Wire.available())
@@ -36,6 +39,7 @@ uint16_t readRegister16(uint8_t addr)
     uint8_t msb = Wire.read();
     return ((uint16_t)msb << 8 | lsb);
   }
+  Serial.println("No data!");
   return (0); //Sensor did not respond
 }
 

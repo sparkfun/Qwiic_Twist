@@ -145,30 +145,14 @@ void receiveEvent(int numberOfBytesReceived)
 //While we are sending bytes we may have to do some calculations
 void requestEvent()
 {
+  //Calculate time stamps before we start sending bytes via I2C
+  if(lastEncoderTwistTime > 0) registerMap.timeSinceLastMovement = millis() - lastEncoderTwistTime;
+  if(lastButtonTime > 0) registerMap.timeSinceLastButton = millis() - lastButtonTime;
+
   //This will write the entire contents of the register map struct starting from
   //the register the user requested, and when it reaches the end the master
   //will read 0xFFs.
-  //Wire.write((registerPointer + registerNumber), sizeof(memoryMap) - 1 - registerNumber);
-
-  //Or we can write one byte at a time. This allows us to check for specific bytes and spots
-  //before sending (like time stamps that need to be calculated) or after sending
-  //(like clearing the interrupt flags once they've been read)
-  for (byte byteToSend = registerNumber ; byteToSend < sizeof(memoryMap) - 1 ; byteToSend++)
-  {
-    //Update button and knob timestamps before we write out bytes
-    if (byteToSend == offsetof(struct memoryMap, timeSinceLastMovement) )
-      registerMap.timeSinceLastMovement = millis() - lastEncoderTwistTime;
-    else if (byteToSend == offsetof(struct memoryMap, timeSinceLastButton) )
-      registerMap.timeSinceLastButton = millis() - lastButtonTime;
-
-    Wire.write((uint8_t)*(registerPointer + byteToSend));
-
-    //Clear the status bits
-    if (byteToSend == offsetof(struct memoryMap, status) )
-      registerMap.status = 0; //Zero status bits once it's read
-    else if (byteToSend == (offsetof(struct memoryMap, encoderDifference) + 1) )
-      registerMap.encoderDifference = 99; //Zero difference once both bytes are read
-  }
+  Wire.write((registerPointer + registerNumber), sizeof(memoryMap) - registerNumber);
 
   //Clear the interrupt pin once user has requested something
   interruptIndicated = false;

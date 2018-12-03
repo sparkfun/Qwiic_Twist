@@ -180,6 +180,10 @@ void setup(void)
   pinMode(interruptPin, INPUT); //Interrupt is high-impedance until we have int (and then go low). Optional external pull up.
 #endif
 
+  //Erase anything in EEPROM - used in testing
+  //for(int x = 0 ; x < 100 ; x++)
+  //  EEPROM.write(x, 0xFF);
+
   turnOffExtraBits(); //Turn off all unused peripherals
 
   readSystemSettings(); //Load all system settings from EEPROM
@@ -188,11 +192,6 @@ void setup(void)
 
   lastEncoderTwistTime = 0; //User has not yet twisted the encoder. Used for firing int pin.
   lastButtonTime = 0; //User has not yet pressed the encoder button.
-
-  //Get the initial state of encoder pins
-  //byte MSB = digitalRead(encoderAPin);
-  //byte LSB = digitalRead(encoderBPin);
-  //lastEncoded = (MSB << 1) | LSB; //Convert the 2 pin value to single number
 
   startI2C(); //Determine the I2C address we should be using and begin listening on I2C bus
 
@@ -270,6 +269,7 @@ void recordSystemSettings(void)
   //I2C address is byte
   byte i2cAddr;
 
+  //Read the value currently in EEPROM. If it's different from the memory map then record the memory map value to EEPROM.
   EEPROM.get(LOCATION_I2C_ADDRESS, i2cAddr);
   if (i2cAddr != registerMap.i2cAddress)
   {
@@ -324,7 +324,7 @@ void readSystemSettings(void)
 {
   //Read what I2C address we should use
   registerMap.i2cAddress = EEPROM.read(LOCATION_I2C_ADDRESS);
-  if (registerMap.i2cAddress == 255)
+  if (registerMap.i2cAddress == 0xFF) //Blank
   {
     registerMap.i2cAddress = I2C_ADDRESS_DEFAULT; //By default, we listen for I2C_ADDRESS_DEFAULT
     EEPROM.write(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
@@ -346,7 +346,7 @@ void readSystemSettings(void)
   //There are 24 pulses per rotation on the encoder
   //For each pulse, how much does the user want red to go up (or down)
   EEPROM.get(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed); //16-bit
-  if (registerMap.ledConnectRed == 0xFFFF)
+  if (registerMap.ledConnectRed == 0xFFFF) //Blank
   {
     registerMap.ledConnectRed = 0; //Default to no connection
     EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed);

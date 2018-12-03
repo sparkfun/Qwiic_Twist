@@ -84,18 +84,15 @@ void loop()
   Serial.print("Encoder: ");
   Serial.print(counts);
 
-  int diff = getDiff(); //Get number of ticks different from last reading
-  Serial.print(" Diff: ");
-  Serial.print(diff);
+  //int diff = getDiff(); //Get number of ticks different from last reading
+  //Serial.print(" Diff: ");
+  //Serial.print(diff);
   
-  if (buttonPressed())
-  {
-    Serial.print(" Pressed!");
-  }
+  //if (buttonPressed()) Serial.print(" Pressed!");
 
   Serial.println();
 
-  delay(1000);
+  delay(100);
 }
 
 //Returns true if a click event has occured
