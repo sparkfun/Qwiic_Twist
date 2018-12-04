@@ -14,6 +14,8 @@
 
   0x015A = 346 so the rotary dial has been turned 346 'ticks' since power on
 
+  The Qwiic Twist is best used with the Arduino library found here: http://librarymanager/All#SparkFun_Twist
+
   Feel like supporting our work? Buy a board from SparkFun!
   https://www.sparkfun.com/products/15083
 
@@ -25,8 +27,6 @@
   To support 400kHz I2C communication reliably ATtiny84 needs to run at 8MHz. This requires user to
   click on 'Burn Bootloader' before code is loaded.
 
-  TODO -
-  We don't track which reason the interrupt pin was set and which feature the user has read
 */
 
 #include <Wire.h>
@@ -180,10 +180,6 @@ void setup(void)
   pinMode(interruptPin, INPUT); //Interrupt is high-impedance until we have int (and then go low). Optional external pull up.
 #endif
 
-  //Erase anything in EEPROM - used in testing
-  //for(int x = 0 ; x < 100 ; x++)
-  //  EEPROM.write(x, 0xFF);
-
   turnOffExtraBits(); //Turn off all unused peripherals
 
   readSystemSettings(); //Load all system settings from EEPROM
@@ -251,16 +247,13 @@ void loop(void)
   Serial.print(" Reg: ");
   Serial.print(registerNumber);
 
-  Serial.print(" RegValue: 0x");
-  Serial.print(*(registerPointer + registerNumber), HEX);
-
   if (registerMap.status & (1 << statusButtonClickedBit) )
     Serial.print(" Click");
 
   Serial.println();
 #endif
 
-  //sleep_mode(); //Stop everything and go to sleep. Wake up from Encoder, Button, or I2C interrupts.
+  sleep_mode(); //Stop everything and go to sleep. Wake up from Encoder, Button, or I2C interrupts.
 }
 
 //If the current setting is different from that in EEPROM, update EEPROM
@@ -269,6 +262,14 @@ void recordSystemSettings(void)
   //I2C address is byte
   byte i2cAddr;
 
+  //Error check the current I2C address
+  if(registerMap.i2cAddress < 0x08 || registerMap.i2cAddress > 0x77)
+  {
+    //User has set the address out of range
+    //Go back to defaults
+    registerMap.i2cAddress = I2C_ADDRESS_DEFAULT;     
+  }
+  
   //Read the value currently in EEPROM. If it's different from the memory map then record the memory map value to EEPROM.
   EEPROM.get(LOCATION_I2C_ADDRESS, i2cAddr);
   if (i2cAddr != registerMap.i2cAddress)
@@ -325,7 +326,6 @@ void recordSystemSettings(void)
   //If the user has zero'd out the timestamps then reflect that in the globals
   if(registerMap.timeSinceLastMovement == 0) lastEncoderTwistTime = 0;
   if(registerMap.timeSinceLastButton == 0) lastButtonTime = 0;
-
 }
 
 //Reads the current system settings from EEPROM
@@ -337,6 +337,15 @@ void readSystemSettings(void)
   if (registerMap.i2cAddress == 0xFF) //Blank
   {
     registerMap.i2cAddress = I2C_ADDRESS_DEFAULT; //By default, we listen for I2C_ADDRESS_DEFAULT
+    EEPROM.write(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
+  }
+
+  //Error check I2C address we read from EEPROM
+  if(registerMap.i2cAddress < 0x08 || registerMap.i2cAddress > 0x77)
+  {
+    //User has set the address out of range
+    //Go back to defaults
+    registerMap.i2cAddress = I2C_ADDRESS_DEFAULT;     
     EEPROM.write(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
   }
 

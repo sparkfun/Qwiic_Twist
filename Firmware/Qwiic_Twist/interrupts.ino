@@ -49,6 +49,10 @@ void updateEncoder() {
 
       analogWrite(ledBluePin, 255 - registerMap.ledBrightnessBlue);
     }
+
+    //We have moved one full tick so update moved bit and timestamp
+    registerMap.status |= (1 << statusEncoderMovedBit); //Set the status bit to true to indicate movement
+    lastEncoderTwistTime = millis(); //Timestamp this event
   }
   else if (lastEncoded == 0b10000111) //One indent counter clockwise
   {
@@ -83,11 +87,11 @@ void updateEncoder() {
 
       analogWrite(ledBluePin, 255 - registerMap.ledBrightnessBlue);
     }
+
+    //We have moved one full tick so update moved bit and timestamp
+    registerMap.status |= (1 << statusEncoderMovedBit); //Set the status bit to true to indicate movement
+    lastEncoderTwistTime = millis(); //Timestamp this event
   }
-
-  lastEncoderTwistTime = millis(); //Timestamp this event
-
-  registerMap.status |= (1 << statusEncoderMovedBit); //Set the status bit to true to indicate movement
 }
 
 //Turn on interrupts for the various pins
@@ -117,20 +121,16 @@ void receiveEvent(int numberOfBytesReceived)
 
   //Begin recording the following incoming bytes to the temp memory map
   //starting at the registerNumber (the first byte received)
-  byte x = 0;
-  //while (Wire.available())
-  while(x < numberOfBytesReceived - 1)
+  for (byte x = 0 ; x < numberOfBytesReceived - 1 ; x++)
   {
     byte temp = Wire.read(); //We might record it, we might throw it away
 
-    if ( (x + registerNumber) < (sizeof(memoryMap) - 1) )
+    if ( (x + registerNumber) < sizeof(memoryMap))
     {
       //Clense the incoming byte against the read only protected bits
       //Store the result into the register map
       *(registerPointer + registerNumber + x) &= ~*(protectionPointer + registerNumber + x); //Clear this register if needed
       *(registerPointer + registerNumber + x) |= temp & *(protectionPointer + registerNumber + x); //Or in the user's request (clensed against protection bits)
-      
-      x++;
     }
   }
 
@@ -144,8 +144,8 @@ void receiveEvent(int numberOfBytesReceived)
 void requestEvent()
 {
   //Calculate time stamps before we start sending bytes via I2C
-  if(lastEncoderTwistTime > 0) registerMap.timeSinceLastMovement = millis() - lastEncoderTwistTime;
-  if(lastButtonTime > 0) registerMap.timeSinceLastButton = millis() - lastButtonTime;
+  if (lastEncoderTwistTime > 0) registerMap.timeSinceLastMovement = millis() - lastEncoderTwistTime;
+  if (lastButtonTime > 0) registerMap.timeSinceLastButton = millis() - lastButtonTime;
 
   //Clear the interrupt pin once user has requested something
   interruptIndicated = false;

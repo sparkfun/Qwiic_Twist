@@ -11,6 +11,6 @@ enum eepromLocations {
   LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT = LOCATION_BLUE_CONNECT_AMOUNT + 2, //Previous was an int
 };
 
-//Defaults for each setting
+//Defaults for the I2C address
 const byte I2C_ADDRESS_DEFAULT = 0x3F;
 const byte I2C_FORCED_ADDRESS = 0x3E; //This is the address we go to incase user closes the address jumper
