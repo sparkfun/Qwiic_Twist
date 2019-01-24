@@ -27,6 +27,8 @@
   To support 400kHz I2C communication reliably ATtiny84 needs to run at 8MHz. This requires user to
   click on 'Burn Bootloader' before code is loaded.
 
+  version 1.1:
+    Change the way the interrupt pin goes low. Fixes issue: https://forum.sparkfun.com/viewtopic.php?f=14&t=49095
 */
 
 #include <Wire.h>
@@ -103,7 +105,7 @@ volatile memoryMap registerMap = {
   .id = 0x5C,
   .status = 0x00, //2 - button clicked, 1 - button pressed, 0 - encoder moved
   .firmwareMajor = 0x01, //Firmware version. Helpful for tech support.
-  .firmwareMinor = 0x00,
+  .firmwareMinor = 0x01,
   .interruptEnable = 0x03, //1 - button interrupt, 0 - encoder interrupt
   .encoderCount = 0x0000,
   .encoderDifference = 0x0000,
@@ -122,10 +124,10 @@ volatile memoryMap registerMap = {
 //This defines which of the registers are read-only (0) vs read-write (1)
 memoryMap protectionMap = {
   .id = 0x00,
-  .status = (1<<statusButtonClickedBit) | (1<<statusEncoderMovedBit),//2 - button clicked, 1 - button pressed, 0 - encoder moved
+  .status = (1 << statusButtonClickedBit) | (1 << statusEncoderMovedBit), //2 - button clicked, 1 - button pressed, 0 - encoder moved
   .firmwareMajor = 0x00,
   .firmwareMinor = 0x00,
-  .interruptEnable = (1<<enableInterruptButtonBit) | (1<<enableInterruptEncoderBit), //1 - button int enable, 0 - encoder int enable
+  .interruptEnable = (1 << enableInterruptButtonBit) | (1 << enableInterruptEncoderBit), //1 - button int enable, 0 - encoder int enable
   .encoderCount = 0xFFFF,
   .encoderDifference = 0xFFFF,
   .timeSinceLastMovement = 0xFFFF,
@@ -150,11 +152,20 @@ volatile boolean updateOutputs = false; //Goes true when we receive new bytes fr
 
 volatile byte lastEncoded = 0; //Used to compare encoder readings between interrupts. Helps detect turn direction.
 
-volatile byte interruptIndicated = false; //Tracks the state of the int output pin - helps prevent the need of constantly writing to the pin
-
 volatile unsigned long lastButtonTime; //Time stamp of last button event
 
 volatile unsigned long lastEncoderTwistTime; //Time stamp of last knob movement
+
+//Interrupt turns on when encoder is moved or button is pressed,
+//turns off when interrupts are cleared by command
+enum State {
+  STATE_ENCODER_INT = 0,
+  STATE_BUTTON_INT,
+  STATE_INT_CLEARED,
+  STATE_INT_INDICATED,
+};
+volatile byte interruptState = STATE_INT_CLEARED;
+
 
 //-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
@@ -207,19 +218,36 @@ void setup(void)
 
 void loop(void)
 {
-  //Check if interrupts are enabled
-  if ( (registerMap.interruptEnable & (1 << enableInterruptEncoderBit) ) )
+  //Interrupt pin state machine
+  //There are four states: Encoder Int, Button Int, Int Cleared, Int Indicated
+  //ENCODER_INT state is set here once user has stopped turning encoder
+  //BUTTON_INT state is set if user presses button
+  //INT_CLEARED state is set in the I2C interrupt when Clear Ints command is received.
+  //INT_INDICATED state is set once we change the INT pin to go low
+  if (interruptState == STATE_INT_CLEARED)
   {
-    //See if user has turned the encoder at all
+    //See if user has turned the encoder
     if ( registerMap.status & (1 << statusEncoderMovedBit) )
     {
-      //See if the user has stopped turning the encoder
-      //If they have, see if this is a newTwist or if we've already asserted int
-      if ( (millis() - lastEncoderTwistTime) > registerMap.turnInterruptTimeout)
+      //Check if encoder interrupt is enabled
+      if ( (registerMap.interruptEnable & (1 << enableInterruptEncoderBit) ) )
       {
-        indicateInterrupt(); //Drive INT pin low
+        //See if enough time has passed since the user has stopped turning the encoder
+        if ( (millis() - lastEncoderTwistTime) > registerMap.turnInterruptTimeout)
+        {
+          interruptState = STATE_ENCODER_INT; //Go to next state
+        }
       }
     }
+  }
+
+  //If we are in either encoder or button interrupt state, then set INT low
+  if(interruptState == STATE_ENCODER_INT || interruptState == STATE_BUTTON_INT)
+  {
+    //Set the interrupt pin low to indicate interrupt
+    pinMode(interruptPin, OUTPUT);
+    digitalWrite(interruptPin, LOW);
+    interruptState = STATE_INT_INDICATED;
   }
 
   if (updateOutputs == true)
@@ -263,13 +291,13 @@ void recordSystemSettings(void)
   byte i2cAddr;
 
   //Error check the current I2C address
-  if(registerMap.i2cAddress < 0x08 || registerMap.i2cAddress > 0x77)
+  if (registerMap.i2cAddress < 0x08 || registerMap.i2cAddress > 0x77)
   {
     //User has set the address out of range
     //Go back to defaults
-    registerMap.i2cAddress = I2C_ADDRESS_DEFAULT;     
+    registerMap.i2cAddress = I2C_ADDRESS_DEFAULT;
   }
-  
+
   //Read the value currently in EEPROM. If it's different from the memory map then record the memory map value to EEPROM.
   EEPROM.get(LOCATION_I2C_ADDRESS, i2cAddr);
   if (i2cAddr != registerMap.i2cAddress)
@@ -324,8 +352,8 @@ void recordSystemSettings(void)
     EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
 
   //If the user has zero'd out the timestamps then reflect that in the globals
-  if(registerMap.timeSinceLastMovement == 0) lastEncoderTwistTime = 0;
-  if(registerMap.timeSinceLastButton == 0) lastButtonTime = 0;
+  if (registerMap.timeSinceLastMovement == 0) lastEncoderTwistTime = 0;
+  if (registerMap.timeSinceLastButton == 0) lastButtonTime = 0;
 }
 
 //Reads the current system settings from EEPROM
@@ -341,11 +369,11 @@ void readSystemSettings(void)
   }
 
   //Error check I2C address we read from EEPROM
-  if(registerMap.i2cAddress < 0x08 || registerMap.i2cAddress > 0x77)
+  if (registerMap.i2cAddress < 0x08 || registerMap.i2cAddress > 0x77)
   {
     //User has set the address out of range
     //Go back to defaults
-    registerMap.i2cAddress = I2C_ADDRESS_DEFAULT;     
+    registerMap.i2cAddress = I2C_ADDRESS_DEFAULT;
     EEPROM.write(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
   }
 
@@ -430,14 +458,4 @@ void startI2C()
   //The connections to the interrupts are severed when a Wire.begin occurs. So re-declare them.
   Wire.onReceive(receiveEvent);
   Wire.onRequest(requestEvent);
-}
-
-void indicateInterrupt()
-{
-  if (interruptIndicated == false) //Is the interrupt pin currently being driven low?
-  {
-    interruptIndicated = true;
-    pinMode(interruptPin, OUTPUT); //Go to output to indicate interrupt
-    digitalWrite(interruptPin, LOW); //Pull pin low
-  }
 }

@@ -134,6 +134,22 @@ void receiveEvent(int numberOfBytesReceived)
     }
   }
 
+  if (interruptState == STATE_INT_INDICATED)
+  {
+    //If the user has cleared all the interrupt bits then clear interrupt pin
+    if ( (registerMap.status & (1 << statusButtonClickedBit)) == 0 
+      && (registerMap.status & (1 << statusButtonPressedBit)) == 0
+      && (registerMap.status & (1 << statusEncoderMovedBit)) == 0
+      )
+    {
+      //This will set the int pin to high impedance (aka pulled high by external resistor)
+      digitalWrite(interruptPin, LOW); //Push pin to disable internal pull-ups
+      pinMode(interruptPin, INPUT); //Go to high impedance
+
+      interruptState = STATE_INT_CLEARED; //Go to next state
+    }
+  }
+
   updateOutputs = true; //Update things like LED brightnesses in the main loop
 }
 
@@ -146,11 +162,6 @@ void requestEvent()
   //Calculate time stamps before we start sending bytes via I2C
   if (lastEncoderTwistTime > 0) registerMap.timeSinceLastMovement = millis() - lastEncoderTwistTime;
   if (lastButtonTime > 0) registerMap.timeSinceLastButton = millis() - lastButtonTime;
-
-  //Clear the interrupt pin once user has requested something
-  interruptIndicated = false;
-  digitalWrite(interruptPin, HIGH);
-  pinMode(interruptPin, INPUT); //Go to high impedance
 
   //This will write the entire contents of the register map struct starting from
   //the register the user requested, and when it reaches the end the master
@@ -169,9 +180,13 @@ void buttonInterrupt()
     lastButtonTime = millis();
   }
 
-  //Check if button interrupt is enabled
-  if ( (registerMap.interruptEnable & (1 << enableInterruptButtonBit) ) )
+  //Only change states if we are in a no-interrupt state.
+  if (interruptState == STATE_INT_CLEARED)
   {
-    indicateInterrupt();
+    //Check if button interrupt is enabled
+    if ( (registerMap.interruptEnable & (1 << enableInterruptButtonBit) ) )
+    {
+      interruptState = STATE_BUTTON_INT;
+    }
   }
 }
