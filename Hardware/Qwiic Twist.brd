@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE eagle SYSTEM "eagle.dtd">
-<eagle version="9.2.2">
+<eagle version="9.3.0">
 <drawing>
 <settings>
 <setting alwaysvectorfont="yes"/>
@@ -40,10 +40,10 @@
 <layer number="43" name="vRestrict" color="2" fill="10" visible="no" active="yes"/>
 <layer number="44" name="Drills" color="7" fill="1" visible="no" active="yes"/>
 <layer number="45" name="Holes" color="7" fill="1" visible="yes" active="yes"/>
-<layer number="46" name="Milling" color="3" fill="1" visible="yes" active="yes"/>
+<layer number="46" name="Milling" color="3" fill="1" visible="no" active="yes"/>
 <layer number="47" name="Measures" color="7" fill="1" visible="no" active="yes"/>
 <layer number="48" name="Document" color="7" fill="1" visible="no" active="yes"/>
-<layer number="49" name="Reference" color="7" fill="1" visible="no" active="yes"/>
+<layer number="49" name="Reference" color="7" fill="1" visible="yes" active="yes"/>
 <layer number="50" name="dxf" color="7" fill="1" visible="no" active="yes"/>
 <layer number="51" name="tDocu" color="6" fill="1" visible="yes" active="yes"/>
 <layer number="52" name="bDocu" color="7" fill="1" visible="no" active="yes"/>
@@ -168,6 +168,14 @@
 <wire x1="15.169" y1="18.487" x2="15.169" y2="21.487" width="4" layer="35"/>
 <wire x1="8.4" y1="16.4" x2="8.4" y2="9.7" width="4" layer="35"/>
 <wire x1="15.4" y1="5.6" x2="15.3" y2="7" width="4" layer="35"/>
+<dimension x1="2.54" y1="2.54" x2="2.54" y2="22.86" x3="-3.81" y3="12.7" textsize="1.778" textratio="15" layer="47" unit="inch"/>
+<dimension x1="0" y1="0" x2="0" y2="25.4" x3="-7.62" y3="12.7" textsize="1.778" textratio="15" layer="47" unit="inch"/>
+<dimension x1="2.54" y1="22.86" x2="27.94" y2="22.86" x3="15.24" y3="31.496" textsize="1.778" textratio="15" layer="47" unit="inch"/>
+<dimension x1="0" y1="25.4" x2="30.48" y2="25.4" x3="15.24" y3="37.592" textsize="1.778" textratio="15" layer="47" unit="inch"/>
+<dimension x1="15.24" y1="18.288" x2="30.48" y2="18.288" x3="22.86" y3="27.94" textsize="1.778" textratio="15" layer="47" unit="inch"/>
+<dimension x1="15.24" y1="7.112" x2="15.24" y2="0" x3="-0.762" y3="3.556" textsize="1.778" textratio="15" layer="47" unit="inch"/>
+<dimension x1="28.829" y1="24.257" x2="27.94" y2="22.86" x3="31.614034375" y3="21.503340625" textsize="1.778" textratio="15" layer="47" unit="inch" precision="3"/>
+<text x="-3.81" y="-3.81" size="1.778" layer="47" font="vector" ratio="15">All dimensions in inches</text>
 </plain>
 <libraries>
 <library name="SparkFun">
