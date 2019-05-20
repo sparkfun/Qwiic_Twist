@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE eagle SYSTEM "eagle.dtd">
-<eagle version="9.2.1">
+<eagle version="9.4.0">
 <drawing>
 <settings>
 <setting alwaysvectorfont="yes"/>
@@ -21056,8 +21056,8 @@ You are welcome to use this library for commercial purposes. For attribution, we
 <text x="170.434" y="11.43" size="2.54" layer="94">N. Seidle</text>
 <text x="237.744" y="7.366" size="2.54" layer="94">X10</text>
 <text x="156.718" y="99.06" size="1.778" layer="97">7-Bit Unshifted I2C Address
-Open Jumper (Default): 0x5B
-Closed Jumper: 0x5A
+Open Jumper (Default): 0x3F
+Closed Jumper: 0x3E
 Software configurable as well</text>
 <text x="215.773" y="164.211" size="1.778" layer="97">I2C Pull Ups</text>
 <text x="172.72" y="177.8" size="3.81" layer="97" ratio="15">AVR</text>
