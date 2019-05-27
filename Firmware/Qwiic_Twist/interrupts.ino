@@ -19,6 +19,14 @@ void updateEncoder() {
   if (lastEncoded == 0b01001011) //One indent clockwise
   {
     registerMap.encoderCount++;
+    // If rotationLimit feature turned on, don't let the encoderCount go past this value
+    if (registerMap.rotationLimit)
+    {
+      if (registerMap.encoderCount >= (int16_t)registerMap.rotationLimit)
+      {
+        registerMap.encoderCount = 0;
+      }
+    }
     registerMap.encoderDifference++;
 
     //If the user has enabled connection between a color and the knob, change LED brightness here
@@ -57,6 +65,14 @@ void updateEncoder() {
   else if (lastEncoded == 0b10000111) //One indent counter clockwise
   {
     registerMap.encoderCount--;
+    // If rotationLimit feature turned on, don't let the encoderCount go below zero
+    if (registerMap.rotationLimit)
+    {
+      if (registerMap.encoderCount < 0)
+      {
+        registerMap.encoderCount = registerMap.rotationLimit;
+      }
+    }
     registerMap.encoderDifference--;
 
     //If the user has enabled connection between a color and the knob, change LED brightness here
