@@ -29,6 +29,12 @@
 
   version 1.1:
     Change the way the interrupt pin goes low. Fixes issue: https://forum.sparkfun.com/viewtopic.php?f=14&t=49095
+  version 1.2: (Brian Schmalz, May 27th, 2019)
+    Added Rotation Limit parameter into memory map. If this value is non-zero, then the Encoder Count will never go
+      above this value, and will never go below 0. For example, if you have a 360 count encoder, and you set
+      Rotation Limit to 359, then you will only get Encoder Count values from 0 to 359 no matter how many rotations
+      the encode actually goes through. Note that Rotation Limit can only go from 0 to 32767, and at 0 (default value)
+      the feature is disabled and thus v1.2 works just like v1.1.
 */
 
 #include <Wire.h>
@@ -91,6 +97,7 @@ struct memoryMap {
   int16_t ledConnectBlue;
   uint16_t turnInterruptTimeout;
   byte i2cAddress;
+  uint16_t rotationLimit;
 };
 
 const byte statusButtonClickedBit = 2;
@@ -102,23 +109,24 @@ const byte enableInterruptEncoderBit = 0;
 
 //These are the defaults for all settings
 volatile memoryMap registerMap = {
-  .id = 0x5C,
-  .status = 0x00, //2 - button clicked, 1 - button pressed, 0 - encoder moved
-  .firmwareMajor = 0x01, //Firmware version. Helpful for tech support.
-  .firmwareMinor = 0x01,
-  .interruptEnable = 0x03, //1 - button interrupt, 0 - encoder interrupt
-  .encoderCount = 0x0000,
-  .encoderDifference = 0x0000,
-  .timeSinceLastMovement = 0x0000,
-  .timeSinceLastButton = 0x0000,
-  .ledBrightnessRed = 0xFF,
-  .ledBrightnessGreen = 0xFF,
-  .ledBrightnessBlue = 0xFF,
-  .ledConnectRed = 0x0000,
-  .ledConnectGreen = 0x0000,
-  .ledConnectBlue = 0x0000,
-  .turnInterruptTimeout = 250,
-  .i2cAddress = I2C_ADDRESS_DEFAULT,
+  .id =                         0x5C, // 0x00  
+  .status =                     0x00, // 0x01         2 - button clicked, 1 - button pressed, 0 - encoder moved
+  .firmwareMajor =              0x01, // 0x02         Firmware version. Helpful for tech support.
+  .firmwareMinor =              0x02, // 0x03
+  .interruptEnable =            0x03, // 0x04         1 - button interrupt, 0 - encoder interrupt
+  .encoderCount =             0x0000, // 0x05, 0x06
+  .encoderDifference =        0x0000, // 0x07, 0x08
+  .timeSinceLastMovement =    0x0000, // 0x09, 0x0A
+  .timeSinceLastButton =      0x0000, // 0x0B, 0x0C
+  .ledBrightnessRed =           0xFF, // 0x0D
+  .ledBrightnessGreen =         0xFF, // 0x0E
+  .ledBrightnessBlue =          0xFF, // 0x0F
+  .ledConnectRed =            0x0000, // 0x10, 0x11
+  .ledConnectGreen =          0x0000, // 0x12, 0x13
+  .ledConnectBlue =           0x0000, // 0x14, 0x15
+  .turnInterruptTimeout =        250, // 0x16, 0x17
+  .i2cAddress =  I2C_ADDRESS_DEFAULT, // 0x18
+  .rotationLimit =                 0, // 0x19, 0x1A   0 means disable this feature (disabled by default)
 };
 
 //This defines which of the registers are read-only (0) vs read-write (1)
@@ -128,18 +136,19 @@ memoryMap protectionMap = {
   .firmwareMajor = 0x00,
   .firmwareMinor = 0x00,
   .interruptEnable = (1 << enableInterruptButtonBit) | (1 << enableInterruptEncoderBit), //1 - button int enable, 0 - encoder int enable
-  .encoderCount = 0xFFFF,
-  .encoderDifference = 0xFFFF,
-  .timeSinceLastMovement = 0xFFFF,
-  .timeSinceLastButton = 0xFFFF,
+  .encoderCount = (int16_t)0xFFFF,
+  .encoderDifference = (int16_t)0xFFFF,
+  .timeSinceLastMovement = (uint16_t)0xFFFF,
+  .timeSinceLastButton = (uint16_t)0xFFFF,
   .ledBrightnessRed = 0xFF,
   .ledBrightnessGreen = 0xFF,
   .ledBrightnessBlue = 0xFF,
-  .ledConnectRed = 0xFFFF,
-  .ledConnectGreen = 0xFFFF,
-  .ledConnectBlue = 0xFFFF,
-  .turnInterruptTimeout = 0xFFFF,
+  .ledConnectRed = (int16_t)0xFFFF,
+  .ledConnectGreen = (int16_t)0xFFFF,
+  .ledConnectBlue = (int16_t)0xFFFF,
+  .turnInterruptTimeout = (uint16_t)0xFFFF,
   .i2cAddress = 0xFF,
+  .rotationLimit = 0xFFFF,
 };
 
 //Cast 32bit address of the object registerMap with uint8_t so we can increment the pointer
@@ -302,31 +311,31 @@ void recordSystemSettings(void)
   EEPROM.get(LOCATION_I2C_ADDRESS, i2cAddr);
   if (i2cAddr != registerMap.i2cAddress)
   {
-    EEPROM.put(LOCATION_I2C_ADDRESS, registerMap.i2cAddress);
+    EEPROM.put(LOCATION_I2C_ADDRESS, (byte)registerMap.i2cAddress);
     startI2C(); //Determine the I2C address we should be using and begin listening on I2C bus
   }
 
   byte intBits;
   EEPROM.get(LOCATION_INTERRUPTS, intBits);
   if (intBits != registerMap.interruptEnable)
-    EEPROM.put(LOCATION_INTERRUPTS, registerMap.interruptEnable);
+    EEPROM.put(LOCATION_INTERRUPTS, (byte)registerMap.interruptEnable);
 
   //LED values are bytes
   byte ledBrightness;
 
   EEPROM.get(LOCATION_RED_BRIGHTNESS, ledBrightness);
   if (ledBrightness != registerMap.ledBrightnessRed)
-    EEPROM.put(LOCATION_RED_BRIGHTNESS, registerMap.ledBrightnessRed);
+    EEPROM.put(LOCATION_RED_BRIGHTNESS, (byte)registerMap.ledBrightnessRed);
   analogWrite(ledRedPin, 255 - registerMap.ledBrightnessRed); //Change LED brightness
 
   EEPROM.get(LOCATION_GREEN_BRIGHTNESS, ledBrightness);
   if (ledBrightness != registerMap.ledBrightnessGreen)
-    EEPROM.put(LOCATION_GREEN_BRIGHTNESS, registerMap.ledBrightnessGreen);
+    EEPROM.put(LOCATION_GREEN_BRIGHTNESS, (byte)registerMap.ledBrightnessGreen);
   analogWrite(ledGreenPin, 255 - registerMap.ledBrightnessGreen); //Change LED brightness
 
   EEPROM.get(LOCATION_BLUE_BRIGHTNESS, ledBrightness);
   if (ledBrightness != registerMap.ledBrightnessBlue)
-    EEPROM.put(LOCATION_BLUE_BRIGHTNESS, registerMap.ledBrightnessBlue);
+    EEPROM.put(LOCATION_BLUE_BRIGHTNESS, (byte)registerMap.ledBrightnessBlue);
   analogWrite(ledBluePin, 255 - registerMap.ledBrightnessBlue); //Change LED brightness
 
   //Connect amounts are ints
@@ -334,32 +343,41 @@ void recordSystemSettings(void)
 
   EEPROM.get(LOCATION_RED_CONNECT_AMOUNT, setting);
   if (setting != registerMap.ledConnectRed)
-    EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed);
+    EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, (int16_t)registerMap.ledConnectRed);
 
   EEPROM.get(LOCATION_GREEN_CONNECT_AMOUNT, setting);
   if (setting != registerMap.ledConnectGreen)
-    EEPROM.put(LOCATION_GREEN_CONNECT_AMOUNT, registerMap.ledConnectGreen);
+    EEPROM.put(LOCATION_GREEN_CONNECT_AMOUNT, (int16_t)registerMap.ledConnectGreen);
 
   EEPROM.get(LOCATION_BLUE_CONNECT_AMOUNT, setting);
   if (setting != registerMap.ledConnectBlue)
-    EEPROM.put(LOCATION_BLUE_CONNECT_AMOUNT, registerMap.ledConnectBlue);
+    EEPROM.put(LOCATION_BLUE_CONNECT_AMOUNT, (int16_t)registerMap.ledConnectBlue);
 
   //Turn Timeout is uint16_t
   uint16_t timeout;
 
   EEPROM.get(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, timeout);
   if (timeout != registerMap.turnInterruptTimeout)
-    EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
+    EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, (int16_t)registerMap.turnInterruptTimeout);
 
   //If the user has zero'd out the timestamps then reflect that in the globals
   if (registerMap.timeSinceLastMovement == 0) lastEncoderTwistTime = 0;
   if (registerMap.timeSinceLastButton == 0) lastButtonTime = 0;
+
+  //Rotation Limit is uint16_t
+  uint16_t rotationLim;
+
+  EEPROM.get(LOCATION_ROTATION_LIMIT, rotationLim);
+  if (rotationLim != registerMap.rotationLimit)
+    EEPROM.put(LOCATION_ROTATION_LIMIT, (int16_t)registerMap.rotationLimit);
 }
 
 //Reads the current system settings from EEPROM
 //If anything looks weird, reset setting to default value
 void readSystemSettings(void)
 {
+  uint16_t discard; // do-nothing variable put in to eleminate compiler warnings
+
   //Read what I2C address we should use
   registerMap.i2cAddress = EEPROM.read(LOCATION_I2C_ADDRESS);
   if (registerMap.i2cAddress == 0xFF) //Blank
@@ -400,33 +418,43 @@ void readSystemSettings(void)
   //Read the connection value for red color
   //There are 24 pulses per rotation on the encoder
   //For each pulse, how much does the user want red to go up (or down)
-  EEPROM.get(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed); //16-bit
-  if (registerMap.ledConnectRed == 0xFFFF) //Blank
+  discard = EEPROM.get(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed); //16-bit
+  if ((uint16_t)registerMap.ledConnectRed == 0xFFFF) //Blank
   {
     registerMap.ledConnectRed = 0; //Default to no connection
-    EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, registerMap.ledConnectRed);
+    EEPROM.put(LOCATION_RED_CONNECT_AMOUNT, (int16_t)registerMap.ledConnectRed);
   }
 
-  EEPROM.get(LOCATION_GREEN_CONNECT_AMOUNT, registerMap.ledConnectGreen);
-  if (registerMap.ledConnectGreen == 0xFFFF)
+  discard = EEPROM.get(LOCATION_GREEN_CONNECT_AMOUNT, registerMap.ledConnectGreen);
+  if ((uint16_t)registerMap.ledConnectGreen == 0xFFFF)
   {
     registerMap.ledConnectGreen = 0; //Default to no connection
-    EEPROM.put(LOCATION_GREEN_CONNECT_AMOUNT, registerMap.ledConnectGreen);
+    EEPROM.put(LOCATION_GREEN_CONNECT_AMOUNT, (int16_t)registerMap.ledConnectGreen);
   }
 
-  EEPROM.get(LOCATION_BLUE_CONNECT_AMOUNT, registerMap.ledConnectBlue);
-  if (registerMap.ledConnectBlue == 0xFFFF)
+  discard = EEPROM.get(LOCATION_BLUE_CONNECT_AMOUNT, registerMap.ledConnectBlue);
+  if ((uint16_t)registerMap.ledConnectBlue == 0xFFFF)
   {
     registerMap.ledConnectBlue = 0; //Default to no connection
-    EEPROM.put(LOCATION_BLUE_CONNECT_AMOUNT, registerMap.ledConnectBlue);
+    EEPROM.put(LOCATION_BLUE_CONNECT_AMOUNT, (int16_t)registerMap.ledConnectBlue);
   }
 
-  EEPROM.get(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
-  if (registerMap.turnInterruptTimeout == 0xFFFF)
+  discard = EEPROM.get(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
+  if ((uint16_t)registerMap.turnInterruptTimeout == 0xFFFF)
   {
     registerMap.turnInterruptTimeout = 250; //Default to 250ms
-    EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, registerMap.turnInterruptTimeout);
+    EEPROM.put(LOCATION_TURN_INTERRUPT_TIMEOUT_AMOUNT, (int16_t)registerMap.turnInterruptTimeout);
   }
+
+  discard = EEPROM.get(LOCATION_ROTATION_LIMIT, registerMap.rotationLimit);
+  if ((uint16_t)registerMap.rotationLimit == 0xFFFF)
+  {
+    registerMap.rotationLimit = 0; // Default to 0 (off)
+    EEPROM.put(LOCATION_ROTATION_LIMIT, (int16_t)registerMap.rotationLimit);
+  }
+
+  // To eleminate compiler warning
+  (void)discard;
 }
 
 //Turn off anything we aren't going to use
