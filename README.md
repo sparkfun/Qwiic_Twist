@@ -34,10 +34,9 @@ This product is _**open source**_!
 
 Please review the LICENSE.md file for license information. 
 
-If you have any questions or concerns on licensing, please contact techsupport@sparkfun.com.
+If you have any questions or concerns on licensing, please visit the [SparkFun Forum](https://forum.sparkfun.com/index.php) and post a topic. For more general questions related to our qwiic system, please visit this section of the forum: [SparkFun Forums: QWIIC SYSTEMS](https://forum.sparkfun.com/viewforum.php?f=105)
 
 Please use, reuse, and modify these files as you see fit. Please maintain attribution to SparkFun Electronics and release any derivative under the same license.
 
 Distributed as-is; no warranty is given.
-
 - Your friends at SparkFun.
